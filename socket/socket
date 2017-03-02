@@ -1,0 +1,148 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Yii socket file.
+ *
+ * @link http://www.yiiframework.com/
+ * @copyright Copyright (c) 2008 Yii Software LLC
+ * @license http://www.yiiframework.com/license/
+ */
+
+
+class Socket {
+
+	private $application;
+
+	public $socket;
+	public $data;
+	public $params;
+	public $type;
+
+	public static $ins;
+
+	static public function ins () {
+		if(!self::$ins) self::$ins = new self;
+		return self::$ins;
+	}
+
+	public function run () {
+		
+		defined('YII_DEBUG') or define('YII_DEBUG', true);
+		defined('YII_ENV') or define('YII_ENV', 'dev');
+
+		require(dirname(__DIR__) . '/vendor/autoload.php');
+		require(dirname(__DIR__) . '/vendor/yiisoft/yii2/Yii.php');
+		require(dirname(__DIR__) . '/common/config/bootstrap.php');
+		require(dirname(__DIR__) . '/socket/config/bootstrap.php');
+
+		$config = yii\helpers\ArrayHelper::merge(
+			require(dirname(__DIR__) . '/common/config/main.php'),
+			require(dirname(__DIR__) . '/common/config/main-local.php'),
+			require(dirname(__DIR__) . '/socket/config/main.php'),
+			require(dirname(__DIR__) . '/socket/config/main-local.php')
+		);
+		$this->application = new yii\console\Application($config);
+
+		$config = [
+			'type' => 'tcp',
+			'daemonize' => 0
+		];
+		
+		foreach ($_SERVER['argv'] as $param) {
+			foreach ($config as $key => $value) {
+				$option = '--' . $key . '=';
+				if (strpos($param, $option) !== false) {
+					$value = substr($param, strlen($option));
+					$config[$key] = $value;
+				}
+			}
+		}
+		
+		$this->type = $config['type'];
+		unset($config['type']);
+
+		if ($this->type == 'web') {
+
+			$this->socket = new swoole_websocket_server("0.0.0.0", 9502);
+			
+			$this->socket->set($config);
+
+			$this->socket->on('open', function ($socket, $request) {
+				$this->onConnect($socket, $request->fd);
+			});
+
+			$this->socket->on('message', function ($socket, $request) {
+				$this->onReceive($socket, $request->fd, $request->data, ['opcode' => $request->opcode, 'finish' => $request->finish]);
+			});
+
+			$this->socket->on('close', function ($socket, $client) {
+				$this->onClose($socket, $client);
+			});
+
+		} else {
+
+			//创建Server对象，监听 127.0.0.1:9501端口
+			$this->socket = new swoole_server("0.0.0.0", 9501);
+
+			$this->socket->set($config);
+
+			//监听连接进入事件
+			$this->socket->on('connect', function ($socket, $client) {
+				$this->onConnect($socket, $client);
+			});
+
+			//监听数据发送事件
+			$this->socket->on('receive', function ($socket, $client, $react, $data) {
+				$this->onReceive($socket, $client, $data, ['react' => $react]);
+			});
+
+			//监听连接关闭事件
+			$this->socket->on('close', function ($socket, $client) {
+				$this->onClose($socket, $client);
+			});
+
+		}
+
+		//启动服务器
+		$this->socket->start();
+	}
+
+	private function onConnect ($socket, $client) {
+		echo "Client: {$client} Connect.\n";
+	}
+
+	private function onReceive ($socket, $client, $data, $params = []) {
+		try {
+			$data = json_decode($data, true);
+			if (isset($data['route']))
+				$route = $data['route'];
+			else
+				throw new Exception('您没有设置路由(Route)哦!', 500);
+
+			unset($data['route']);
+			$this->client = $client;
+			$this->data = $data;
+			$this->params = $params;
+
+			$this->application->runAction($route);
+
+		} catch (\Exception $e) {
+			$results = ['status' => $e->getCode(), 'message' => $e->getMessage()];
+			$this->send($client, $results);
+		}
+	}
+
+	private function onClose ($socket, $client) {
+		echo "Client: {$client} Close.\n";
+	}
+
+
+	public function send ($client, $message) {
+		if ($this->type == 'web')
+			$this->socket->push($client, json_encode($message));
+		else
+			$this->socket->send($client, json_encode($message));
+	}
+
+}
+Socket::ins()->run();
