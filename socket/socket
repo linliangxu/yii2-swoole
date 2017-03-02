@@ -1,13 +1,14 @@
 #!/usr/bin/env php
 <?php
 /**
- * Yii socket file.
- *
- * @link http://www.yiiframework.com/
- * @copyright Copyright (c) 2008 Yii Software LLC
- * @license http://www.yiiframework.com/license/
+ * Swoole Socket.
+ * @version 1.0.1
+ * @package Plug
+ * @author Linxu
+ * @link http://article.zhile.name
+ * @email lliangxu@qq.com
+ * @date 2017年3月2日
  */
-
 
 class Socket {
 
